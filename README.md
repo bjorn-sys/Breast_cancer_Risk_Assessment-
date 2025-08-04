@@ -103,3 +103,6 @@ import pickle
 with open('breast_model.pkl', 'wb') as file:
     pickle.dump(knn, file)
 
+
+link : http://localhost:8501/
+
