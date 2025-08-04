@@ -204,5 +204,5 @@ with open('breast_model.pkl', 'wb') as file:
     pickle.dump(knn, file)
 
 
-link : http://localhost:8501/
+ Network URL: http://172.31.235.243:8501
 
