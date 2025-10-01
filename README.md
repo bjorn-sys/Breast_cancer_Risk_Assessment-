@@ -197,12 +197,8 @@ This AI-powered breast lump classifier provides meaningful impact for both **hea
 > ⚠️ **Disclaimer**: This tool is intended for educational and research purposes only. It should not be used for official medical diagnosis without supervision by licensed medical professionals.
 
 
-```python
-# Save the model
-import pickle
-with open('breast_model.pkl', 'wb') as file:
-    pickle.dump(knn, file)
 
 
- Network URL: http://172.31.235.243:8501
+
+ Network URL: [http://172.31.235.243:8501](https://breast-cancer-predictionsz.streamlit.app/)
 
