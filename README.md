@@ -198,7 +198,7 @@ This AI-powered breast lump classifier provides meaningful impact for both **hea
 
 
 
+> Deployed with AWS Cloud Services
 
-
- Network URL: [http://172.31.235.243:8501](https://breast-cancer-predictionsz.streamlit.app/)
+ Network URL: [http://3.231.93.0:8501]
 
