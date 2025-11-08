@@ -1,106 +1,141 @@
+# --------------------------------------------------------------
+# 🩺 Breast Lump Classification: Benign vs Malignant
+# --------------------------------------------------------------
 import streamlit as st
-import numpy as np
 import pandas as pd
+import numpy as np
 import pickle
 
-# Load the saved KNN model
-with open('breast_model.pkl', 'rb') as file:
+# --------------------------------------------------------------
+# 📘 Load Model and Scaler
+# --------------------------------------------------------------
+with open("breast_model2.pkl", "rb") as file:
     model = pickle.load(file)
 
-st.set_page_config(page_title="Breast Lump Classifier", layout="wide")
+with open("scaler.pkl", "rb") as file:
+    scaler = pickle.load(file)
 
-# App title
+# --------------------------------------------------------------
+# 🧬 App Title and Medical Summary
+# --------------------------------------------------------------
 st.title("🩺 Breast Lump Classification: Benign vs Malignant")
+
 st.markdown("""
-This Streamlit app predicts whether a breast lump is **Benign (Non-Cancerous)** or **Malignant (Cancerous)** using either manual entry or uploaded files.
+### 🧬 Benign vs Malignant Findings
+
+**✅ Benign Findings**
+- Growth Pattern: Non-invasive, localized  
+- Borders: Well-defined, smooth margins  
+- Growth Rate: Slow or stable  
+- Histology: Normal cell structure, no atypia  
+💡 *Typical Examples:* Fibroadenoma, cysts, fibrocystic changes  
+
+**⚠️ Malignant Findings**
+- Growth Pattern: Invasive, may spread (metastasis)  
+- Borders: Irregular or spiculated  
+- Growth Rate: Rapid  
+- Histology: Atypical cells with abnormal nuclei  
+💡 *Typical Examples:* Invasive ductal or lobular carcinoma  
 """)
 
-# Tabs for switching between Manual Input and File Upload
-tab1, tab2 = st.tabs(["📌 Manual Input", "📂 Upload CSV or Excel"])
+st.write("---")
 
-# -------------------------------------------
-# 📌 TAB 1: MANUAL INPUT
-# -------------------------------------------
-with tab1:
-    st.header("🔬 Enter Diagnostic Features")
+# --------------------------------------------------------------
+# 🧩 Feature Input Section
+# --------------------------------------------------------------
+st.subheader("🔢 Input Diagnostic Features")
 
-    feature_names = [
-        'radius_mean', 'texture_mean', 'perimeter_mean', 'area_mean', 'smoothness_mean',
-        'compactness_mean', 'concavity_mean', 'concave points_mean', 'symmetry_mean',
-        'fractal_dimension_mean', 'radius_se', 'texture_se', 'perimeter_se', 'area_se',
-        'smoothness_se', 'compactness_se', 'concavity_se', 'concave points_se',
-        'symmetry_se', 'fractal_dimension_se', 'radius_worst', 'texture_worst',
-        'perimeter_worst', 'area_worst', 'smoothness_worst', 'compactness_worst',
-        'concavity_worst', 'concave points_worst', 'symmetry_worst', 'fractal_dimension_worst'
-    ]
+# Define the top 10 important features
+features = [
+    'concave points_worst',
+    'concave points_mean',
+    'radius_worst',
+    'perimeter_mean',
+    'area_worst',
+    'area_mean',
+    'radius_mean',
+    'perimeter_worst',
+    'concavity_mean',
+    'concavity_worst'
+]
 
-    user_input = []
+# Collect user input
+input_data = []
+for feature in features:
+    val = st.number_input(f"{feature.replace('_', ' ').title()}", value=0.0)
+    input_data.append(val)
 
-    cols = st.columns(3)
-    for i, feature in enumerate(feature_names):
-        with cols[i % 3]:
-            val = st.number_input(f"{feature.replace('_', ' ').title()}", min_value=0.0, format="%.4f")
-            user_input.append(val)
+# Convert input to DataFrame
+input_df = pd.DataFrame([input_data], columns=features)
 
-    if st.button("🎯 Predict Diagnosis"):
-        input_array = np.array(user_input).reshape(1, -1)
-        prediction = model.predict(input_array)
-        prob = model.predict_proba(input_array)[0]
-        result = "🟢 Benign (Non-Cancerous)" if prediction[0] == 0 else "🔴 Malignant (Cancerous)"
+# --------------------------------------------------------------
+# 🧠 Make Prediction
+# --------------------------------------------------------------
+if st.button("🔍 Predict"):
+    # ✅ Apply the same scaler used during training
+    scaled_input = scaler.transform(input_df)
 
-        st.subheader("🔎 Prediction Result")
-        st.success(result if prediction[0] == 0 else "")
-        st.error(result if prediction[0] == 1 else "")
-        st.info(f"🧪 Prediction Confidence: Benign {prob[0]*100:.2f}% | Malignant {prob[1]*100:.2f}%")
+    # Get probabilities and prediction
+    probabilities = model.predict_proba(scaled_input)[0]
 
-# -------------------------------------------
-# 📂 TAB 2: FILE UPLOAD
-# -------------------------------------------
-with tab2:
-    st.header("📁 Upload File for Bulk Prediction")
-
-    uploaded_file = st.file_uploader("Upload CSV or Excel file", type=["csv", "xlsx"])
-
-    if uploaded_file is not None:
-        try:
-            if uploaded_file.name.endswith('.csv'):
-                df = pd.read_csv(uploaded_file)
-            else:
-                df = pd.read_excel(uploaded_file)
-        except Exception as e:
-            st.error(f"❌ Error reading file: {e}")
-        else:
-            st.write("✅ Uploaded Data Preview:")
-            st.dataframe(df.head())
-
-            # Ensure all required columns are present
-            if all(col in df.columns for col in feature_names):
-                X_input = df[feature_names]
-                predictions = model.predict(X_input)
-                probabilities = model.predict_proba(X_input)
-
-                df["Prediction"] = np.where(predictions == 0, "Benign", "Malignant")
-                df["Benign (%)"] = (probabilities[:, 0] * 100).round(2)
-                df["Malignant (%)"] = (probabilities[:, 1] * 100).round(2)
-
-                st.subheader("📊 Prediction Summary")
-                st.dataframe(df)
-
-              
+    # --------------------------------------------------------------
+    # 🧩 Apply a tuned threshold for balanced output
+    # --------------------------------------------------------------
+    threshold = 0.40  # adjust slightly (0.5–0.6) for your dataset
+    prediction =  1 if probabilities[1] >= threshold else 0
 
 
-                # Option to download results
-                csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button("📥 Download Results as CSV", data=csv, file_name="breast_lump_predictions.csv", mime='text/csv')
+    # --------------------------------------------------------------
+# 📈 Show Prediction Probabilities
+# --------------------------------------------------------------
+    st.write("**Prediction Probability:**")
+    st.write(f"- Benign: {probabilities[0]*100:.2f}%")
+    st.write(f"- Malignant: {probabilities[1]*100:.2f}%")
+    st.info(f"🧭 Custom decision threshold applied: {threshold}")
+  
 
-            else:
-                st.error("❌ The uploaded file is missing one or more required feature columns.")
-                
-# -------------------------------------------
-# Footer
-# -------------------------------------------
-st.markdown("""
----
-🧬 *Built for awareness and medical education only.*  
-⚠️ *This tool does **not** replace a clinical diagnosis.*
-""")
+    st.write("---")
+    st.subheader("📊 Prediction Result")
+
+    # --------------------------------------------------------------
+    # 🎯 Display Prediction Outcome
+    # --------------------------------------------------------------
+    if prediction == 1:
+        st.error("### 🧬 The model predicts: **Malignant (Cancerous Tumor)**")
+        reason = (
+            "High values in area, radius, or concavity suggest irregular and invasive "
+            "cell growth patterns consistent with malignancy."
+        )
+    else:
+        st.success("### ✅ The model predicts: **Benign (Non-Cancerous Tumor)**")
+        reason = (
+            "Features suggest small, smooth, and localized growth — typical of benign lesions."
+        )
+
+   
+    # --------------------------------------------------------------
+    # 🧩 Explain the Prediction
+    # --------------------------------------------------------------
+    st.subheader("📖 Why this prediction?")
+    st.markdown("""
+    The model relies heavily on:
+    - **Concave points (mean/worst):** measures irregularities in tumor shape.  
+      Higher values usually mean malignancy.  
+    - **Radius & Perimeter (mean/worst):** larger sizes often correspond to invasive tumors.  
+    - **Area (mean/worst):** larger mass area tends to indicate cancerous growth.  
+    - **Concavity (mean/worst):** measures inward curvature of the tumor boundary.  
+
+    💡 *Interpretation:*  
+    When several shape-related features show large or irregular values,
+    the model leans toward **malignant**; otherwise, it suggests **benign**.
+    """)
+
+    # Reason summary
+    st.write("---")
+    st.markdown(f"🩺 **Interpretation Summary:** {reason}")
+
+# --------------------------------------------------------------
+# ⚠️ Medical Disclaimer
+# --------------------------------------------------------------
+st.write("---")
+st.markdown("📚 *Developed for educational and research purposes only — not a medical diagnostic tool.*")
