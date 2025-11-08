@@ -82,20 +82,22 @@ This project:
   - `K-Nearest Neighbors (KNN)`
   - `Random Forest`
   - `Decision Tree`
+  - `Xgboost classifier`
 - Cross-validation was used for performance comparison
 
 ---
 
-## 🏆 Final Model: K-Nearest Neighbors
+## 🏆 Final Model: Random Forest
 
-- **Train Accuracy:** 97%  
-- **Test Accuracy:** 96%  
-- **Precision:** 1.00  
-- **Recall:** 0.91  
-- **F1 Score:** 0.95  
-- **ROC AUC Score:** 0.95  
+- **Train Accuracy:** 1.00%  
+- **Test Accuracy:** 95%
+- **Accuracy:** 95%
+- **Precision:** 98%  
+- **Recall:** 0.89  
+- **F1 Score:** 0.93
+- **ROC AUC Score:** 0.94  
 
-🎯 **KNN provided the best overall accuracy and was saved as the final model.**\\
+🎯 **Random Forest provided the best overall accuracy and was saved as the final model.**\\
 
 # 🧬 Benign vs Malignant Findings
 
@@ -198,7 +200,7 @@ This AI-powered breast lump classifier provides meaningful impact for both **hea
 
 
 
-> Deployed with AWS Cloud Services
+> Deployed with Streamlit Cloud
 
- Network URL: [http://3.231.93.0:8501]
+ Network URL: [https://breast-cancer-predictionsz.streamlit.app/]
 
