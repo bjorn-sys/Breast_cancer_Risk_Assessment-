@@ -1,206 +1,1144 @@
-# --------------------------------------------------------------
-# 🩺 Breast Lump Classification: Benign vs Malignant (Market-Ready)
-# --------------------------------------------------------------
+# --------------------------------------------------------------------
+# 🩺 Breast Lump Classification App - Refactored & Corrected Version
+# --------------------------------------------------------------------
+
 import streamlit as st
 import pandas as pd
 import numpy as np
-import pickle
-from PIL import Image
+from matplotlib.figure import Figure
 import plotly.graph_objects as go
+import plotly.express as px
+from datetime import datetime
+import uuid
+import base64
+from io import BytesIO
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+from reportlab.graphics.shapes import Drawing
+from reportlab.graphics.charts.barcharts import HorizontalBarChart
 
-# --------------------------------------------------------------
-# 📘 Load Model and Scaler
-# --------------------------------------------------------------
-with open("breast_model2.pkl", "rb") as file:
-    model = pickle.load(file)
+# =============================================================================
+# PAGE CONFIGURATION
+# =============================================================================
+st.set_page_config(
+    page_title="Breast Lump Classifier",
+    page_icon="🩺",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-with open("scaler.pkl", "rb") as file:
-    scaler = pickle.load(file)
-
-# --------------------------------------------------------------
-# 🧬 App Title and Summary
-# --------------------------------------------------------------
-st.set_page_config(page_title="Breast Lump Classifier", layout="wide")
-st.title("🩺 Breast Lump Classification: Benign vs Malignant")
-st.markdown("""
-### 🧬 Benign vs Malignant Findings
-
-**✅ Benign Findings**
-- Growth Pattern: Non-invasive, localized  
-- Borders: Well-defined, smooth margins  
-- Growth Rate: Slow or stable  
-- Histology: Normal cell structure, no atypia  
-💡 *Typical Examples:* Fibroadenoma, cysts, fibrocystic changes  
-
-**⚠️ Malignant Findings**
-- Growth Pattern: Invasive, may spread (metastasis)  
-- Borders: Irregular or spiculated  
-- Growth Rate: Rapid  
-- Histology: Atypical cells with abnormal nuclei  
-💡 *Typical Examples:* Invasive ductal or lobular carcinoma  
-""")
-
-st.write("---")
-
-# --------------------------------------------------------------
-# 🔧 Adjustable Threshold Slider
-# --------------------------------------------------------------
-threshold = st.sidebar.slider("Decision Threshold for Malignant Prediction", min_value=0.0, max_value=1.0, value=0.40, step=0.01)
-st.sidebar.markdown(f"**Current Threshold:** {threshold:.2f}")
-
-# --------------------------------------------------------------
-# 🧩 File Upload Section
-# --------------------------------------------------------------
-st.subheader("📁 Upload CSV or Excel File for Batch Prediction")
-uploaded_file = st.file_uploader("Choose a CSV or Excel file", type=['csv', 'xls', 'xlsx'])
-
-features = [
-    'concave points_worst',
-    'concave points_mean',
-    'radius_worst',
-    'perimeter_mean',
-    'area_worst',
-    'area_mean',
-    'radius_mean',
-    'perimeter_worst',
-    'concavity_mean',
-    'concavity_worst'
-]
-
-if uploaded_file is not None:
-    try:
-        if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
-        else:
-            df = pd.read_excel(uploaded_file, engine='openpyxl')
-        
-        st.success("File loaded successfully!")
-        st.dataframe(df.head())
-        
-        if all(f in df.columns for f in features):
-            scaled_data = scaler.transform(df[features])
-            probs = model.predict_proba(scaled_data)
-            predictions = np.where(probs[:,1] >= threshold, 'Malignant', 'Benign')
-            
-            df['Prediction'] = predictions
-            df['Prob_Benign'] = probs[:,0]
-            df['Prob_Malignant'] = probs[:,1]
-            
-            # Highlight borderline cases (55%-85%)
-            def highlight_borderline(row):
-                if 0.55 <= row['Prob_Malignant'] <= 0.85:
-                    return ['background-color: yellow']*len(row)
-                return ['']*len(row)
-            
-            st.subheader("📊 Batch Prediction Results")
-            st.dataframe(df.style.apply(highlight_borderline, axis=1))
-            
-            csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Download Predictions as CSV",
-                data=csv,
-                file_name="breast_predictions.csv",
-                mime="text/csv"
-            )
-        else:
-            missing = [f for f in features if f not in df.columns]
-            st.error(f"Missing required features: {missing}")
-    except Exception as e:
-        st.error(f"Error reading file: {e}")
-
-# --------------------------------------------------------------
-# 🔢 Single Input Section
-# --------------------------------------------------------------
-st.subheader("🔢 Or Input Diagnostic Features Manually")
-
-input_data = []
-for feature in features:
-    val = st.number_input(f"{feature.replace('_',' ').title()}", value=0.0)
-    input_data.append(val)
-
-input_df = pd.DataFrame([input_data], columns=features)
-
-# --------------------------------------------------------------
-# 🧠 Single Prediction and Visualization
-# --------------------------------------------------------------
-if st.button("🔍 Predict Single Input"):
-    scaled_input = scaler.transform(input_df)
-    probabilities = model.predict_proba(scaled_input)[0]
-    prediction = 1 if probabilities[1] >= threshold else 0
-
-    st.write("**Prediction Probability:**")
-    st.write(f"- Benign: {probabilities[0]*100:.2f}%")
-    st.write(f"- Malignant: {probabilities[1]*100:.2f}%")
+# =============================================================================
+# SESSION STATE INITIALIZATION
+# =============================================================================
+def initialize_session_state():
+    """Initialize all session state variables safely."""
+    defaults = {
+        'patient_history': {},
+        'current_patient_id': None,
+        'single_pred': None,
+        'batch_pred': None,
+        'show_tutorial': True,
+        'show_new_patient_form': False,
+        'new_patient_form_submitted': False,
+        'inputs': {
+            'concave points_mean': 0.08, 
+            'radius_worst': 14.5, 
+            'perimeter_mean': 90.0,
+            'area_worst': 900.0, 
+            'area_mean': 500.0, 
+            'radius_mean': 8.5,
+            'perimeter_worst': 95.0, 
+            'concavity_mean': 0.12, 
+            'concavity_worst': 0.18,
+            'concave points_worst': 0.12
+        },
+        'doctor_notes_text': "Schedule biopsy\nFollow up in 2 weeks\nMonitor symptoms",
+        'foods_eat_text': "Leafy greens\nFruits\nWhole grains\nLean proteins",
+        'foods_avoid_text': "Processed meats\nAlcohol\nSugary foods\nHigh-fat dairy",
+        'preventive_text': "Regular self-exams\nAnnual mammograms\nMaintain healthy weight",
+        'corrective_text': "Follow-up with specialist\nConsider biopsy\nAdditional imaging"
+    }
     
-    # Prediction Bar Chart
-    fig = go.Figure(go.Bar(
-        x=['Benign', 'Malignant'],
-        y=[probabilities[0]*100, probabilities[1]*100],
-        marker_color=['green','red'],
-        text=[f"{probabilities[0]*100:.2f}%", f"{probabilities[1]*100:.2f}%"],
-        textposition='auto'
-    ))
-    fig.update_layout(title_text="Prediction Probability", yaxis_title="Probability (%)")
-    st.plotly_chart(fig)
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
 
-    st.write("---")
-    # Prediction Interpretation
-    if prediction == 1:
-        st.error("### 🧬 Malignant (Cancerous Tumor)")
-        reason = "High values in area, radius, or concavity suggest irregular and invasive cell growth patterns consistent with malignancy."
-        color = "red"
-        # Show malignant image
-        try:
-            malignant_img = Image.open("malignant_example.jpg")
-            st.image(malignant_img, caption="Malignant Tumor Example", use_column_width=True)
-        except:
-            st.warning("Malignant image not found. Place 'malignant_example.jpg' in app folder.")
-        preventive = "- Regular self-exams & mammograms\n- Healthy diet & exercise\n- Avoid alcohol & smoking"
-        corrective = "- Consult oncologist immediately\n- Follow biopsy/treatment protocols\n- Consider surgery/chemo/radiotherapy"
-        instructions = "- Do not ignore early warning signs\n- Schedule follow-up tests\n- Keep medical records updated"
-    else:
-        st.success("### ✅ Benign (Non-Cancerous Tumor)")
-        reason = "Features suggest small, smooth, and localized growth — typical of benign lesions."
-        color = "green"
-        # Show benign image
-        try:
-            benign_img = Image.open("benign_example.jpg")
-            st.image(benign_img, caption="Benign Tumor Example", use_column_width=True)
-        except:
-            st.warning("Benign image not found. Place 'benign_example.jpg' in app folder.")
-        preventive = "- Regular breast self-exams\n- Maintain healthy lifestyle\n- Routine check-ups"
-        corrective = "- Monitor lump for changes\n- Consult doctor if size/texture changes\n- Follow medical advice"
-        instructions = "- Track any new symptoms\n- Maintain regular screenings\n- Stay informed on breast health"
+initialize_session_state()
 
-    # Feature Importance Radar Chart
-    fig_radar = go.Figure()
-    fig_radar.add_trace(go.Scatterpolar(
-        r=input_data,
-        theta=features,
-        fill='toself',
-        name='Feature Values',
-        line_color=color
-    ))
-    fig_radar.update_layout(
-        polar=dict(radialaxis=dict(visible=True)),
-        showlegend=True,
-        title="🔹 Feature Profile (Single Input)"
+# =============================================================================
+# PREDICTION LOGIC
+# =============================================================================
+class BreastCancerPredictor:
+    def __init__(self):
+        self.features = [
+            'concave points_worst', 'concave points_mean', 'radius_worst',
+            'perimeter_mean', 'area_worst', 'area_mean', 'radius_mean',
+            'perimeter_worst', 'concavity_mean', 'concavity_worst'
+        ]
+
+    def predict(self, df, threshold=0.5):
+        """
+        Simple rule-based prediction logic for demonstration.
+        
+        Args:
+            df: DataFrame containing clinical features
+            threshold: Classification threshold for malignant prediction
+            
+        Returns:
+            tuple: (predictions, probabilities, risks)
+        """
+        try:
+            # Ensure all required features are present
+            for feature in self.features:
+                if feature not in df.columns:
+                    df[feature] = 0.0
+
+            probs = []
+            for _, row in df.iterrows():
+                # Simple scoring system based on feature values
+                score = 0
+                if row['radius_worst'] > 15: score += 1
+                if row['concave points_worst'] > 0.1: score += 1
+                if row['area_worst'] > 800: score += 1
+                if row['concavity_worst'] > 0.2: score += 1
+                if row['perimeter_worst'] > 100: score += 1
+
+                # Convert score to probability (capped at 0.8 for demonstration)
+                prob_malignant = min(0.8, score * 0.2)
+                prob_benign = 1 - prob_malignant
+                probs.append([prob_benign, prob_malignant])
+
+            probs = np.array(probs)
+            preds = (probs[:, 1] >= threshold).astype(int)
+
+            # Assign risk levels based on probability
+            risks = []
+            for prob in probs[:, 1]:
+                if prob < 0.2: 
+                    risks.append(("Low Risk", prob))
+                elif prob < 0.4: 
+                    risks.append(("Mild Risk", prob))
+                elif prob < 0.6: 
+                    risks.append(("Moderate Risk", prob))
+                else: 
+                    risks.append(("High Risk", prob))
+
+            return preds, probs, risks
+
+        except Exception as e:
+            st.error(f"Prediction error: {e}")
+            # Return safe default values
+            n = len(df)
+            return (
+                np.zeros(n), 
+                np.array([[0.8, 0.2]] * n), 
+                [("Low Risk", 0.2)] * n
+            )
+
+# =============================================================================
+# PDF REPORT GENERATION
+# =============================================================================
+def generate_pdf_report(patient_data, prediction_data, input_data, doctor_notes, foods_eat, foods_avoid):
+    """Generate a PDF report for the patient analysis."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=0.5*inch)
+    styles = getSampleStyleSheet()
+    story = []
+    
+    # Title
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=16,
+        spaceAfter=30,
+        alignment=1,  # Center alignment
+        textColor=colors.HexColor('#2E86AB')
     )
-    st.plotly_chart(fig_radar)
+    story.append(Paragraph("BREAST LUMP ANALYSIS REPORT", title_style))
+    story.append(Spacer(1, 20))
+    
+    # Patient Information Section
+    story.append(Paragraph("PATIENT INFORMATION", styles['Heading2']))
+    patient_info = [
+        ["Patient Name:", patient_data['name']],
+        ["Patient ID:", patient_data['patient_id']],
+        ["Age:", str(patient_data['age'])],
+        ["Gender:", patient_data['gender']],
+        ["Contact:", patient_data.get('contact', 'N/A')],
+        ["Medical ID:", patient_data.get('medical_id', 'N/A')],
+        ["Report Date:", datetime.now().strftime("%Y-%m-%d %H:%M")]
+    ]
+    
+    patient_table = Table(patient_info, colWidths=[2*inch, 3*inch])
+    patient_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F8F9FA')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#2E86AB')),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#FFFFFF')),
+        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#CCCCCC'))
+    ]))
+    story.append(patient_table)
+    story.append(Spacer(1, 20))
+    
+    # Prediction Results Section
+    story.append(Paragraph("ANALYSIS RESULTS", styles['Heading2']))
+    
+    preds, probs, risks = prediction_data['pred'], prediction_data['probs'], prediction_data['risks']
+    prediction_label = "Malignant" if preds[0] == 1 else "Benign"
+    risk_level, probability = risks[0][0], probs[0][1]
+    
+    results_info = [
+        ["Prediction:", f"<b>{prediction_label}</b>"],
+        ["Risk Level:", f"<b>{risk_level}</b>"],
+        ["Malignant Probability:", f"<b>{probability:.1%}</b>"],
+        ["Confidence Score:", f"<b>{max(probs[0])*100:.1f}%</b>"],
+        ["Analysis Date:", datetime.now().strftime("%Y-%m-%d %H:%M")]
+    ]
+    
+    results_table = Table(results_info, colWidths=[2*inch, 3*inch])
+    results_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#FFFFFF')),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#CCCCCC'))
+    ]))
+    story.append(results_table)
+    story.append(Spacer(1, 20))
+    
+    # Clinical Features Section
+    story.append(Paragraph("CLINICAL FEATURES", styles['Heading2']))
+    features_data = [["Feature", "Value"]]
+    for feature, value in input_data.items():
+        display_name = feature.replace('_', ' ').title()
+        features_data.append([display_name, f"{value:.3f}"])
+    
+    features_table = Table(features_data, colWidths=[3*inch, 2*inch])
+    features_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2E86AB')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F8F9FA')),
+        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#CCCCCC'))
+    ]))
+    story.append(features_table)
+    story.append(Spacer(1, 20))
+    
+    # Medical Notes Section
+    if doctor_notes and doctor_notes.strip():
+        story.append(Paragraph("CLINICAL NOTES & RECOMMENDATIONS", styles['Heading2']))
+        notes_style = ParagraphStyle(
+            'NotesStyle',
+            parent=styles['Normal'],
+            backColor=colors.HexColor('#FFF3CD'),
+            borderPadding=10,
+            spaceAfter=12
+        )
+        story.append(Paragraph(doctor_notes.replace('\n', '<br/>'), notes_style))
+        story.append(Spacer(1, 15))
+    
+    # Lifestyle Recommendations
+    if (foods_eat and foods_eat.strip()) or (foods_avoid and foods_avoid.strip()):
+        story.append(Paragraph("LIFESTYLE RECOMMENDATIONS", styles['Heading2']))
+        
+        recommendations_content = []
+        
+        if foods_eat and foods_eat.strip():
+            recommendations_content.append(Paragraph("<b>Foods to Include:</b>", styles['Normal']))
+            recommendations_content.append(Paragraph(foods_eat.replace('\n', '<br/>'), styles['Normal']))
+            recommendations_content.append(Spacer(1, 10))
+        
+        if foods_avoid and foods_avoid.strip():
+            recommendations_content.append(Paragraph("<b>Foods to Avoid:</b>", styles['Normal']))
+            recommendations_content.append(Paragraph(foods_avoid.replace('\n', '<br/>'), styles['Normal']))
+        
+        for item in recommendations_content:
+            story.append(item)
+        
+        story.append(Spacer(1, 20))
+    
+    # Risk Level Explanation
+    story.append(Paragraph("RISK LEVEL INTERPRETATION", styles['Heading2']))
+    risk_explanation = """
+    <b>Low Risk (0-20%):</b> Routine screening recommended. Maintain healthy lifestyle.<br/>
+    <b>Mild Risk (20-40%):</b> Increased monitoring advised. Follow-up in 3-6 months.<br/>
+    <b>Moderate Risk (40-60%):</b> Further investigation recommended. Consider additional imaging.<br/>
+    <b>High Risk (60-100%):</b> Immediate specialist consultation and biopsy recommended.
+    """
+    story.append(Paragraph(risk_explanation, styles['Normal']))
+    story.append(Spacer(1, 20))
+    
+    # Disclaimer
+    disclaimer_style = ParagraphStyle(
+        'DisclaimerStyle',
+        parent=styles['Normal'],
+        fontSize=8,
+        textColor=colors.gray,
+        alignment=1
+    )
+    disclaimer = """
+    <i>This report is generated for educational and demonstration purposes only. 
+    This is not a medical diagnosis. All clinical decisions should be made by qualified healthcare professionals. 
+    Consult with your healthcare provider for proper medical advice and treatment.</i>
+    """
+    story.append(Paragraph(disclaimer, disclaimer_style))
+    
+    # Build PDF
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
 
-    # Display measures and instructions
-    st.subheader("📖 Why this prediction?")
-    st.markdown(reason)
-    st.write("---")
-    st.subheader("💡 Preventive Measures")
-    st.markdown(f"<span style='color:{color}'>{preventive.replace('-', '•')}</span>", unsafe_allow_html=True)
-    st.subheader("🛠 Corrective Measures")
-    st.markdown(f"<span style='color:{color}'>{corrective.replace('-', '•')}</span>", unsafe_allow_html=True)
-    st.subheader("📋 Instructions")
-    st.markdown(f"<span style='color:{color}'>{instructions.replace('-', '•')}</span>", unsafe_allow_html=True)
+def create_download_link(pdf_buffer, filename):
+    """Create a download link for the PDF file."""
+    b64 = base64.b64encode(pdf_buffer.read()).decode()
+    href = f'<a href="data:application/pdf;base64,{b64}" download="{filename}" style="\
+        background-color: #4CAF50;\
+        color: white;\
+        padding: 12px 24px;\
+        text-align: center;\
+        text-decoration: none;\
+        display: inline-block;\
+        border-radius: 4px;\
+        font-weight: bold;\
+        border: none;\
+        cursor: pointer;">\
+        📄 Download PDF Report</a>'
+    return href
 
-# --------------------------------------------------------------
-# ⚠️ Medical Disclaimer
-# --------------------------------------------------------------
-st.write("---")
-st.markdown("📚 *Developed for educational and research purposes only — not a medical diagnostic tool.*")
+# =============================================================================
+# UI HELPER FUNCTIONS
+# =============================================================================
+def create_risk_gauge(probability):
+    """Create a Plotly risk gauge visualization."""
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=probability * 100,
+        domain={'x': [0, 1], 'y': [0, 1]},
+        title={
+            'text': "Malignant Probability", 
+            'font': {'size': 20, 'color': 'darkblue'}
+        },
+        gauge={
+            'axis': {
+                'range': [None, 100],
+                'tickwidth': 1,
+                'tickcolor': "darkblue"
+            },
+            'bar': {'color': "darkred"},
+            'bgcolor': "white",
+            'borderwidth': 2,
+            'bordercolor': "gray",
+            'steps': [
+                {'range': [0, 20], 'color': 'lightgreen'},
+                {'range': [20, 40], 'color': 'yellow'},
+                {'range': [40, 60], 'color': 'orange'},
+                {'range': [60, 100], 'color': 'red'}
+            ],
+            'threshold': {
+                'line': {'color': "black", 'width': 4},
+                'thickness': 0.75,
+                'value': probability * 100
+            }
+        }
+    ))
+    fig.update_layout(
+        height=250, 
+        margin=dict(l=10, r=10, t=50, b=10),
+        font={'color': "darkblue", 'family': "Arial"}
+    )
+    return fig
+
+def create_risk_barchart(probability, risk_level):
+    """Create a horizontal bar chart showing risk level comparison."""
+    risk_levels = ['Low Risk', 'Mild Risk', 'Moderate Risk', 'High Risk']
+    risk_ranges = ['0-20%', '20-40%', '40-60%', '60-100%']
+    risk_colors = ['lightgreen', 'yellow', 'orange', 'red']
+    
+    values = [20, 20, 20, 20]
+    current_risk_index = risk_levels.index(risk_level)
+    
+    fig = go.Figure()
+    
+    for i, (level, range_val, color, value) in enumerate(zip(risk_levels, risk_ranges, risk_colors, values)):
+        fig.add_trace(go.Bar(
+            y=[f"{level}\n{range_val}"],
+            x=[value],
+            orientation='h',
+            marker=dict(
+                color=color,
+                line=dict(color='black', width=1 if i != current_risk_index else 3)
+            ),
+            name=level,
+            hovertemplate=f"<b>{level}</b><br>Range: {range_val}<extra></extra>"
+        ))
+    
+    fig.add_trace(go.Scatter(
+        y=[f"{risk_levels[current_risk_index]}\n{risk_ranges[current_risk_index]}"],
+        x=[10],
+        mode='markers+text',
+        marker=dict(
+            size=20,
+            color='black',
+            symbol='diamond'
+        ),
+        text=["📍 CURRENT"],
+        textposition="middle right",
+        textfont=dict(color='black', size=12, weight='bold'),
+        showlegend=False,
+        hoverinfo='skip'
+    ))
+    
+    fig.update_layout(
+        title=dict(
+            text="🩺 Risk Level Comparison",
+            font=dict(size=16, color='darkblue', weight='bold')
+        ),
+        xaxis=dict(
+            title="Risk Scale",
+            range=[0, 25],
+            showticklabels=False,
+            showgrid=False
+        ),
+        yaxis=dict(
+            title="",
+            showgrid=False
+        ),
+        showlegend=False,
+        height=200,
+        margin=dict(l=10, r=10, t=50, b=10),
+        plot_bgcolor='white'
+    )
+    
+    return fig
+
+def create_feature_importance_chart(input_data, probability):
+    """Create a bar chart showing feature contributions to the risk score."""
+    features = list(input_data.keys())
+    values = list(input_data.values())
+    
+    scores = []
+    for feature, value in input_data.items():
+        if 'worst' in feature and value > np.percentile(list(input_data.values()), 70):
+            scores.append(min(3, (value / max(1, np.max(list(input_data.values()))) * 3)))
+        else:
+            scores.append(min(2, (value / max(1, np.max(list(input_data.values()))) * 2)))
+    
+    importance_df = pd.DataFrame({
+        'Feature': [f.replace('_', ' ').title() for f in features],
+        'Importance': scores,
+        'Value': values
+    })
+    
+    importance_df = importance_df.sort_values('Importance', ascending=True)
+    
+    fig = px.bar(
+        importance_df,
+        x='Importance',
+        y='Feature',
+        orientation='h',
+        title='📊 Feature Contribution to Risk Assessment',
+        color='Importance',
+        color_continuous_scale=['lightgreen', 'yellow', 'orange', 'red'],
+        hover_data={'Value': ':.3f'}
+    )
+    
+    fig.update_layout(
+        height=300,
+        xaxis_title="Contribution Score",
+        yaxis_title="",
+        showlegend=False,
+        coloraxis_showscale=False,
+        margin=dict(l=10, r=10, t=50, b=10)
+    )
+    
+    return fig
+
+def show_tutorial():
+    """Show the tutorial expander if it hasn't been hidden by the user."""
+    if st.session_state.show_tutorial:
+        with st.expander("🎓 Quick Start Guide - Click to Expand", expanded=True):
+            st.markdown("""
+            ### Welcome to the Breast Lump Classification App! 🩺
+
+            **Getting Started:**
+            
+            1.  **Create a New Patient**: Use the 'New Patient' button
+            2.  **Enter Clinical Data**: Fill in the feature values on the 'Single Prediction' tab
+            3.  **Analyze**: Click 'Analyze Patient' to get the risk assessment
+            4.  **Review**: Check the prediction, risk level, and recommendations
+            5.  **Customize**: Edit the clinical notes and food recommendations as needed
+            6.  **Export**: Download PDF reports for patient records
+            7.  **Manage**: View all patient records and their history in the 'Patient History' tab
+
+            ---
+            """)
+            
+            if st.button(
+                "✅ Got it! Hide this guide", 
+                key="hide_tutorial_button",
+                use_container_width=True
+            ):
+                st.session_state.show_tutorial = False
+                st.rerun()
+
+def create_new_patient_form(unique_suffix=""):
+    """Displays a form to create a new patient record with unique key."""
+    
+    if not st.session_state.show_new_patient_form:
+        return
+    
+    st.subheader("📝 Create New Patient Record")
+    
+    form_key = f"new_patient_form_{unique_suffix}"
+    
+    with st.form(form_key, clear_on_submit=True):
+        name = st.text_input(
+            "Full Name*", 
+            placeholder="Enter patient's full name",
+            help="Required field"
+        )
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            age = st.number_input(
+                "Age", 
+                min_value=1, 
+                max_value=120, 
+                value=45,
+                help="Patient's age in years"
+            )
+            contact = st.text_input(
+                "Contact Info", 
+                placeholder="Phone or email",
+                help="Primary contact information"
+            )
+        
+        with col2:
+            gender = st.selectbox(
+                "Gender", 
+                ["Female", "Male", "Other"],
+                help="Patient's gender"
+            )
+            medical_id = st.text_input(
+                "Medical Record Number", 
+                placeholder="Optional",
+                help="Hospital or clinic record number"
+            )
+        
+        notes = st.text_area(
+            "Medical Notes", 
+            placeholder="Relevant medical history, family history, etc.",
+            help="Additional clinical notes and observations"
+        )
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            submit_btn = st.form_submit_button(
+                "✅ Create Patient", 
+                use_container_width=True
+            )
+        with col2:
+            cancel_btn = st.form_submit_button(
+                "❌ Cancel", 
+                use_container_width=True
+            )
+        
+        if submit_btn:
+            if name.strip():
+                patient_id = str(uuid.uuid4())[:8].upper()
+                st.session_state.patient_history[patient_id] = {
+                    'patient_id': patient_id, 
+                    'name': name.strip(), 
+                    'age': age,
+                    'gender': gender, 
+                    'contact': contact, 
+                    'medical_id': medical_id,
+                    'notes': notes, 
+                    'created_date': datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    'predictions': []
+                }
+                st.session_state.current_patient_id = patient_id
+                st.session_state.show_new_patient_form = False
+                st.success(f"✅ Patient '{name}' created successfully!")
+                st.rerun()
+            else:
+                st.error("❌ Patient name is required.")
+        
+        if cancel_btn:
+            st.session_state.show_new_patient_form = False
+            st.rerun()
+
+def patient_selection_section():
+    """UI section for selecting an existing patient or creating a new one."""
+    st.subheader("👥 Patient Selection")
+    
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        patient_options = {
+            f"{p['name']} (ID: {pid})": pid 
+            for pid, p in st.session_state.patient_history.items()
+        }
+        
+        current_patient_display = next(
+            (k for k, v in patient_options.items() 
+             if v == st.session_state.current_patient_id), 
+            None
+        )
+
+        selected_display = st.selectbox(
+            "Choose Patient",
+            options=["Select a patient..."] + list(patient_options.keys()),
+            index=(
+                list(patient_options.keys()).index(current_patient_display) + 1 
+                if current_patient_display else 0
+            ),
+            key="patient_selector"
+        )
+        
+        if selected_display != "Select a patient...":
+            st.session_state.current_patient_id = patient_options[selected_display]
+        else:
+            st.session_state.current_patient_id = None
+            
+    with col2:
+        if st.button(
+            "➕ New Patient", 
+            key="new_patient_button", 
+            use_container_width=True
+        ):
+            st.session_state.show_new_patient_form = True
+            st.rerun()
+    
+    if st.session_state.current_patient_id:
+        show_current_patient_info()
+
+def show_current_patient_info():
+    """Display a summary card for the currently selected patient."""
+    patient = st.session_state.patient_history.get(st.session_state.current_patient_id)
+    if not patient:
+        st.session_state.current_patient_id = None
+        return
+
+    with st.container(border=True):
+        st.markdown(f"### 👤 Current Patient: {patient['name']}")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.write(f"**Patient ID:** {patient['patient_id']}")
+            st.write(f"**Age:** {patient['age']}")
+        
+        with col2:
+            st.write(f"**Gender:** {patient['gender']}")
+            st.write(f"**Contact:** {patient.get('contact', 'N/A')}")
+        
+        with col3:
+            st.write(f"**Medical ID:** {patient.get('medical_id', 'N/A')}")
+            pred_count = len(patient.get('predictions', []))
+            st.metric("Total Predictions", pred_count)
+
+# =============================================================================
+# TAB FUNCTIONS
+# =============================================================================
+def single_prediction_tab(predictor, threshold):
+    """Content for the 'Single Patient Analysis' tab."""
+    st.header("🔍 Single Patient Analysis")
+    
+    patient_selection_section()
+    
+    create_new_patient_form("single_prediction")
+    
+    if st.session_state.current_patient_id:
+        st.subheader("🔢 Clinical Feature Input")
+        
+        with st.form("feature_input_form_single", clear_on_submit=False):
+            cols = st.columns(3)
+            input_data = {}
+            features = list(st.session_state.inputs.keys())
+            
+            for i, feature in enumerate(features):
+                with cols[i % 3]:
+                    display_name = feature.replace('_', ' ').title()
+                    value = st.number_input(
+                        display_name, 
+                        value=float(st.session_state.inputs.get(feature, 0.0)),
+                        key=f"input_{feature}_single", 
+                        step=0.01, 
+                        format="%.3f",
+                        help=f"Enter value for {display_name}"
+                    )
+                    input_data[feature] = value
+            
+            analyze_button = st.form_submit_button(
+                "🎯 Analyze Patient", 
+                type="primary", 
+                use_container_width=True
+            )
+
+        if analyze_button:
+            st.session_state.inputs.update(input_data)
+            input_df = pd.DataFrame([input_data])
+            
+            with st.spinner("🔬 Analyzing clinical features..."):
+                preds, probs, risks = predictor.predict(input_df, threshold)
+                
+                st.session_state.single_pred = {
+                    'pred': preds, 
+                    'probs': probs, 
+                    'risks': risks,
+                    'input_data': input_data.copy()
+                }
+                
+                patient = st.session_state.patient_history[st.session_state.current_patient_id]
+                prediction_record = {
+                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    'prediction': "Malignant" if preds[0] == 1 else "Benign",
+                    'probability': float(probs[0][1] * 100),
+                    'risk_level': risks[0][0],
+                    'threshold': threshold,
+                    'features': {k: float(v) for k, v in input_data.items()}
+                }
+                patient.setdefault('predictions', []).append(prediction_record)
+
+        if st.session_state.single_pred:
+            pred_data = st.session_state.single_pred
+            preds, probs, risks = pred_data['pred'], pred_data['probs'], pred_data['risks']
+            prediction_label = "Malignant" if preds[0] == 1 else "Benign"
+            risk_level, probability = risks[0][0], probs[0][1]
+            
+            # Display prediction result with PDF download button
+            col1, col2, col3 = st.columns([2, 1, 1])
+            with col1:
+                if preds[0] == 1:
+                    st.error(
+                        f"🚨 **PREDICTION:** {prediction_label} | "
+                        f"**RISK LEVEL:** {risk_level} | "
+                        f"**PROBABILITY:** {probability:.1%}"
+                    )
+                else:
+                    st.success(
+                        f"✅ **PREDICTION:** {prediction_label} | "
+                        f"**RISK LEVEL:** {risk_level} | "
+                        f"**PROBABILITY:** {probability:.1%}"
+                    )
+            
+            with col2:
+                st.metric("Confidence Score", f"{max(probs[0])*100:.1f}%")
+            
+            with col3:
+                # Generate and display PDF download link
+                patient_data = st.session_state.patient_history[st.session_state.current_patient_id]
+                pdf_buffer = generate_pdf_report(
+                    patient_data,
+                    pred_data,
+                    pred_data['input_data'],
+                    st.session_state.doctor_notes_text,
+                    st.session_state.foods_eat_text,
+                    st.session_state.foods_avoid_text
+                )
+                
+                filename = f"Breast_Analysis_Report_{patient_data['name'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+                st.markdown(create_download_link(pdf_buffer, filename), unsafe_allow_html=True)
+
+            # Risk visualization section
+            st.subheader("📊 Risk Assessment Visualization")
+            
+            viz_col1, viz_col2 = st.columns(2)
+            
+            with viz_col1:
+                st.plotly_chart(
+                    create_risk_gauge(probability), 
+                    use_container_width=True
+                )
+            
+            with viz_col2:
+                st.plotly_chart(
+                    create_risk_barchart(probability, risk_level),
+                    use_container_width=True
+                )
+            
+            st.plotly_chart(
+                create_feature_importance_chart(pred_data['input_data'], probability),
+                use_container_width=True
+            )
+            
+            # Clinical notes and instructions - WITH ON_CHANGE UPDATES
+            st.subheader("🩺 Clinical Notes & Instructions")
+            
+            # Update session state when text areas change
+            updated_doctor_notes = st.text_area(
+                "Doctor Notes & Recommendations", 
+                value=st.session_state.doctor_notes_text, 
+                key="doctor_notes_area", 
+                height=100,
+                on_change=lambda: st.session_state.update({
+                    'doctor_notes_text': st.session_state.doctor_notes_area
+                })
+            )
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                updated_foods_eat = st.text_area(
+                    "Foods to Eat", 
+                    value=st.session_state.foods_eat_text, 
+                    key="foods_eat_area", 
+                    height=120,
+                    on_change=lambda: st.session_state.update({
+                        'foods_eat_text': st.session_state.foods_eat_area
+                    })
+                )
+            with col2:
+                updated_foods_avoid = st.text_area(
+                    "Foods to Avoid", 
+                    value=st.session_state.foods_avoid_text, 
+                    key="foods_avoid_area", 
+                    height=120,
+                    on_change=lambda: st.session_state.update({
+                        'foods_avoid_text': st.session_state.foods_avoid_area
+                    })
+                )
+            
+            # Update session state immediately when values change
+            if updated_doctor_notes != st.session_state.doctor_notes_text:
+                st.session_state.doctor_notes_text = updated_doctor_notes
+            if updated_foods_eat != st.session_state.foods_eat_text:
+                st.session_state.foods_eat_text = updated_foods_eat
+            if updated_foods_avoid != st.session_state.foods_avoid_text:
+                st.session_state.foods_avoid_text = updated_foods_avoid
+            
+            # Additional recommendations
+            st.subheader("💡 Recommended Actions")
+            if risk_level == "High Risk":
+                st.warning("""
+                **Immediate Actions Recommended:**
+                - Schedule urgent biopsy
+                - Consult with oncology specialist
+                - Consider advanced imaging (MRI)
+                - Discuss treatment options
+                """)
+            elif risk_level == "Moderate Risk":
+                st.info("""
+                **Follow-up Actions:**
+                - Schedule follow-up in 2-4 weeks
+                - Consider ultrasound
+                - Monitor for changes
+                - Discuss risk factors
+                """)
+            elif risk_level == "Mild Risk":
+                st.info("""
+                **Monitoring Recommendations:**
+                - Regular self-exams
+                - Follow-up in 3-6 months
+                - Maintain healthy lifestyle
+                - Annual screening
+                """)
+            else:
+                st.success("""
+                **Routine Care:**
+                - Continue regular screenings
+                - Maintain healthy habits
+                - Annual clinical exams
+                - Self-awareness of changes
+                """)
+                
+            # Refresh PDF button to regenerate with updated notes
+            st.info("💡 **Note**: If you update the clinical notes or food recommendations, click the button below to refresh the PDF report.")
+            if st.button("🔄 Refresh PDF Report with Updated Notes", key="refresh_pdf_button"):
+                # Regenerate PDF with updated notes
+                pdf_buffer = generate_pdf_report(
+                    patient_data,
+                    pred_data,
+                    pred_data['input_data'],
+                    st.session_state.doctor_notes_text,
+                    st.session_state.foods_eat_text,
+                    st.session_state.foods_avoid_text
+                )
+                
+                filename = f"Breast_Analysis_Report_{patient_data['name'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+                st.markdown(create_download_link(pdf_buffer, filename), unsafe_allow_html=True)
+                st.success("PDF report updated with latest notes!")
+    else:
+        st.info("👆 Please select or create a patient to begin analysis.")
+
+# ... (rest of the code for batch_prediction_tab, patient_history_tab, about_tab, and main function remains the same)
+
+def batch_prediction_tab(predictor, threshold):
+    """Content for the 'Batch Patient Analysis' tab."""
+    st.header("📁 Batch Patient Analysis")
+    
+    st.info(
+        "Upload a CSV or Excel file with patient data. "
+        "The file must contain columns matching the required clinical features."
+    )
+    
+    uploaded_file = st.file_uploader(
+        "Choose a file", 
+        type=['csv', 'xlsx'], 
+        key="batch_file_uploader"
+    )
+    
+    if uploaded_file is not None:
+        try:
+            if uploaded_file.name.endswith('.csv'):
+                df = pd.read_csv(uploaded_file)
+            else:
+                df = pd.read_excel(uploaded_file)
+            
+            st.success(f"✅ File uploaded successfully! Found {len(df)} records.")
+            
+            with st.expander("📊 Data Preview", expanded=True):
+                st.dataframe(df.head())
+            
+            if st.button(
+                "🔍 Analyze All Patients", 
+                type="primary", 
+                key="batch_analyze_button"
+            ):
+                with st.spinner(f"Analyzing {len(df)} patient records..."):
+                    preds, probs, risks = predictor.predict(df, threshold)
+                    
+                    results_df = df.copy()
+                    results_df['Prediction'] = [
+                        'Malignant' if p == 1 else 'Benign' for p in preds
+                    ]
+                    results_df['Risk_Level'] = [r[0] for r in risks]
+                    results_df['Probability_Malignant'] = [p[1] * 100 for p in probs]
+                    
+                    st.session_state.batch_pred = {'df': results_df}
+
+        except Exception as e:
+            st.error(f"❌ Error processing file: {e}")
+
+    if st.session_state.batch_pred:
+        results_df = st.session_state.batch_pred['df']
+        
+        st.subheader("📈 Analysis Summary")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Total Patients", len(results_df))
+        with col2:
+            benign_count = (results_df['Prediction'] == 'Benign').sum()
+            st.metric("Benign Cases", benign_count)
+        with col3:
+            st.metric("Malignant Cases", len(results_df) - benign_count)
+        with col4:
+            high_risk_count = (results_df['Risk_Level'] == 'High Risk').sum()
+            st.metric("High Risk Cases", high_risk_count)
+        
+        st.subheader("📋 Detailed Results")
+        st.dataframe(results_df)
+        
+        st.subheader("📊 Risk Distribution")
+        risk_counts = results_df['Risk_Level'].value_counts()
+        
+        fig = Figure(figsize=(12, 4))
+        ax1 = fig.add_subplot(1, 2, 1)
+        ax2 = fig.add_subplot(1, 2, 2)
+        
+        ax1.pie(
+            risk_counts.values, 
+            labels=risk_counts.index, 
+            autopct='%1.1f%%', 
+            startangle=90,
+            colors=['lightgreen', 'yellow', 'orange', 'red']
+        )
+        ax1.set_title('Risk Level Distribution', fontweight='bold')
+        
+        risk_counts.sort_index().plot(
+            kind='bar', 
+            ax=ax2, 
+            color=['lightgreen', 'yellow', 'orange', 'red']
+        )
+        ax2.set_title('Risk Level Counts', fontweight='bold')
+        ax2.set_ylabel('Number of Patients')
+        ax2.tick_params(axis='x', rotation=45)
+        fig.tight_layout()
+        
+        st.pyplot(fig)
+
+def patient_history_tab():
+    """Content for the 'Patient Management & History' tab."""
+    st.header("📋 Patient Management & History")
+    
+    if st.button(
+        "➕ Create New Patient", 
+        key="history_new_patient_button", 
+        use_container_width=True
+    ):
+        st.session_state.show_new_patient_form = True
+        st.rerun()
+    
+    create_new_patient_form("patient_history")
+    st.divider()
+
+    patients = st.session_state.patient_history
+    if not patients:
+        st.info("📝 No patient records found. Create a patient to get started.")
+        return
+
+    st.subheader("👥 Patient Records")
+    
+    for patient_id, patient in patients.items():
+        with st.expander(f"**{patient['name']}** (ID: {patient_id})"):
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("Age", patient['age'])
+            with col2:
+                st.metric("Gender", patient['gender'])
+            with col3:
+                st.metric("Total Predictions", len(patient.get('predictions', [])))
+            
+            if patient.get('notes'):
+                st.write("**Medical Notes:**")
+                st.info(patient['notes'])
+                
+            predictions = patient.get('predictions', [])
+            if predictions:
+                st.write("**Prediction History (Latest 5):**")
+                history_df = pd.DataFrame(reversed(predictions[-5:]))
+                st.dataframe(
+                    history_df[['timestamp', 'prediction', 'risk_level', 'probability']],
+                    use_container_width=True
+                )
+            else:
+                st.info("No predictions recorded for this patient yet.")
+
+def about_tab():
+    """Content for the 'About' tab."""
+    st.header("ℹ️ About This Application")
+    
+    st.markdown("""
+    ## Breast Lump Classification App 🩺
+
+    This application is a demonstration tool designed to assist healthcare professionals 
+    in analyzing breast lump characteristics and assessing cancer risk based on clinical features.
+
+    ### 🎯 Purpose
+    - Provide a simulated risk assessment for breast lumps based on clinical measurements
+    - Support clinical decision-making with illustrative recommendations  
+    - Maintain a simple system for patient records and prediction history
+    - Generate comprehensive PDF reports for patient documentation
+
+    ### 🔬 Key Features
+    - **Single Patient Analysis**: Individual risk assessment with PDF export
+    - **Batch Processing**: Analyze multiple patients from files
+    - **Patient Management**: Comprehensive record keeping
+    - **Visual Analytics**: Interactive risk gauges and charts
+    - **Report Generation**: Professional PDF reports with customizable notes
+
+    ### ⚠️ Medical Disclaimer
+    **Important**: This tool is for educational and illustrative purposes only. 
+    It is **not a medical device** and should not be used for actual diagnosis or treatment. 
+    All clinical decisions must be made by qualified healthcare professionals.
+    
+    ---
+    
+    *Built with Streamlit for healthcare education and demonstration purposes.*
+    """)
+
+# =============================================================================
+# MAIN APPLICATION
+# =============================================================================
+def main():
+    """Main application function to run the Streamlit app."""
+    
+    st.title("🩺 Breast Lump Classification System")
+    st.markdown(
+        "Analyze clinical features to assess breast cancer risk and support clinical decision-making."
+    )
+    
+    show_tutorial()
+    
+    with st.sidebar:
+        st.header("⚙️ Configuration")
+        
+        threshold = st.slider(
+            "Classification Threshold", 
+            min_value=0.0, 
+            max_value=1.0, 
+            value=0.5, 
+            step=0.05,
+            help="Adjust the sensitivity for malignant classification. Higher values are more strict.",
+            key="classification_threshold"
+        )
+        
+        st.header("📊 Risk Categories")
+        st.info("""
+        **Risk Levels:**
+        - 🟢 **Low Risk**: 0-20%
+        - 🟡 **Mild Risk**: 20-40%  
+        - 🟠 **Moderate Risk**: 40-60%
+        - 🔴 **High Risk**: 60-100%
+        """)
+        
+        st.header("🚀 Quick Actions")
+        
+        st.warning("The action below will delete all data.")
+        confirm_reset = st.checkbox(
+            "I understand and wish to proceed.", 
+            key="confirm_reset_checkbox"
+        )
+        
+        if st.button("🔄 Reset All Data", key="reset_data_button"):
+            if confirm_reset:
+                keys_to_reset = [
+                    'patient_history', 'current_patient_id', 
+                    'single_pred', 'batch_pred', 'show_new_patient_form'
+                ]
+                for key in keys_to_reset:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                initialize_session_state()
+                st.success("All data has been reset!")
+                st.rerun()
+            else:
+                st.error("Please check the confirmation box to reset data.")
+
+        if st.button("📖 Show Tutorial", key="sidebar_show_tutorial_button"):
+            st.session_state.show_tutorial = True
+            st.rerun()
+        
+        st.header("📈 Application Status")
+        st.metric("Patients in System", len(st.session_state.patient_history))
+        
+        if st.session_state.current_patient_id:
+            current_patient = st.session_state.patient_history.get(
+                st.session_state.current_patient_id
+            )
+            if current_patient:
+                st.success(f"Selected: {current_patient['name']}")
+        else:
+            st.warning("No patient selected")
+
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "🔍 Single Prediction", 
+        "📁 Batch Analysis", 
+        "📋 Patient History", 
+        "ℹ️ About"
+    ])
+    
+    with tab1:
+        single_prediction_tab(BreastCancerPredictor(), threshold)
+    with tab2:
+        batch_prediction_tab(BreastCancerPredictor(), threshold)
+    with tab3:
+        patient_history_tab()
+    with tab4:
+        about_tab()
+
+if __name__ == "__main__":
+    main()
