@@ -7,3 +7,4 @@ seaborn
 plotly
 reportlab
 fpdf
+uuid
