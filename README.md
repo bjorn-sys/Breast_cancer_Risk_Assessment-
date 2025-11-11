@@ -202,5 +202,5 @@ This AI-powered breast lump classifier provides meaningful impact for both **hea
 
 > Deployed with Streamlit Cloud
 
- Network URL: [https://breast-cancer-predictionsz.streamlit.app/]
+
 
