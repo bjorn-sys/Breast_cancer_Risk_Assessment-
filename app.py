@@ -525,8 +525,8 @@ def generate_pdf_report(patient_data, prediction_data, input_data, doctor_notes,
         alignment=1
     )
     disclaimer = """
-    <i>This report is generated for educational and demonstration purposes only. 
-    This is not a medical diagnosis. All clinical decisions should be made by qualified healthcare professionals. 
+    <i>This report is generated for educational and demonstration purposes and also to assist the doctors in making diagnosis faster. 
+    All clinical decisions should be made by qualified healthcare professionals. 
     Consult with your healthcare provider for proper medical advice and treatment.</i>
     """
     story.append(Paragraph(disclaimer, disclaimer_style))
@@ -1373,11 +1373,6 @@ def about_tab():
     - **Report Generation**: Professional PDF reports with customizable notes
     - **Scalable Database**: Supports 10,000+ patient records efficiently
 
-    ### ⚠️ Medical Disclaimer
-    **Important**: This tool is for educational and illustrative purposes only. 
-    It is **not a medical device** and should not be used for actual diagnosis or treatment. 
-    All clinical decisions must be made by qualified healthcare professionals.
-    
     ---
     
     *Built with Streamlit for healthcare education and demonstration purposes.*
