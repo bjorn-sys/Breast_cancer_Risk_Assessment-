@@ -262,6 +262,166 @@ def save_app_settings(settings):
     conn.close()
 
 # =============================================================================
+# AUTHENTICATION SYSTEM
+# =============================================================================
+def check_login(username, password):
+    """Check if username and password are correct"""
+    return username == 'admin' and password == 'admin123'
+
+def login_section():
+    """Display login form and handle authentication"""
+    if not st.session_state.get('logged_in', False):
+        st.sidebar.header("🔐 Admin Login")
+        
+        with st.sidebar.form("login_form"):
+            username = st.text_input("Username", placeholder="Enter username")
+            password = st.text_input("Password", type="password", placeholder="Enter password")
+            login_button = st.form_submit_button("Login")
+            
+            if login_button:
+                if check_login(username, password):
+                    st.session_state.logged_in = True
+                    st.session_state.username = username
+                    st.sidebar.success(f"Welcome, {username}!")
+                    st.rerun()
+                else:
+                    st.sidebar.error("Invalid username or password")
+        
+        return False
+    else:
+        st.sidebar.success(f"✅ Logged in as: {st.session_state.username}")
+        if st.sidebar.button("🚪 Logout"):
+            st.session_state.logged_in = False
+            st.session_state.username = None
+            st.rerun()
+        return True
+
+# =============================================================================
+# DATA EXPORT FUNCTIONS
+# =============================================================================
+def export_all_lab_records():
+    """Export all patient records with their predictions as a comprehensive CSV"""
+    conn = sqlite3.connect(DB_FILE)
+    
+    # Get all patients
+    patients_df = pd.read_sql_query("SELECT * FROM patients", conn)
+    
+    # Get all predictions
+    predictions_df = pd.read_sql_query("SELECT * FROM predictions", conn)
+    
+    conn.close()
+    
+    if patients_df.empty:
+        return None
+    
+    # Create comprehensive lab records
+    lab_records = []
+    
+    for _, patient in patients_df.iterrows():
+        # Get patient's predictions
+        patient_predictions = predictions_df[predictions_df['patient_id'] == patient['patient_id']]
+        
+        if not patient_predictions.empty:
+            # Create one row per prediction
+            for _, prediction in patient_predictions.iterrows():
+                # Parse features JSON
+                features = {}
+                if prediction['features']:
+                    try:
+                        features = json.loads(prediction['features'])
+                    except:
+                        features = {}
+                
+                record = {
+                    'patient_id': patient['patient_id'],
+                    'patient_name': patient['name'],
+                    'age': patient['age'],
+                    'gender': patient['gender'],
+                    'contact': patient['contact'],
+                    'medical_id': patient['medical_id'],
+                    'patient_notes': patient['notes'],
+                    'prediction_id': prediction['id'],
+                    'prediction_date': prediction['timestamp'],
+                    'diagnosis': prediction['prediction'],
+                    'malignant_probability': f"{prediction['probability']:.2f}%",
+                    'risk_level': prediction['risk_level'],
+                    'threshold_used': prediction['threshold']
+                }
+                
+                # Add all clinical features
+                for feature, value in features.items():
+                    feature_name = feature.replace('_', ' ').title()
+                    record[feature_name] = f"{value:.4f}"
+                
+                lab_records.append(record)
+        else:
+            # Patient with no predictions
+            record = {
+                'patient_id': patient['patient_id'],
+                'patient_name': patient['name'],
+                'age': patient['age'],
+                'gender': patient['gender'],
+                'contact': patient['contact'],
+                'medical_id': patient['medical_id'],
+                'patient_notes': patient['notes'],
+                'prediction_id': 'No prediction',
+                'prediction_date': 'No prediction',
+                'diagnosis': 'No prediction',
+                'malignant_probability': 'N/A',
+                'risk_level': 'N/A',
+                'threshold_used': 'N/A'
+            }
+            lab_records.append(record)
+    
+    return pd.DataFrame(lab_records)
+
+def download_all_data_section():
+    """Section for downloading all lab records"""
+    if st.session_state.get('logged_in', False):
+        st.sidebar.header("📊 Data Export")
+        
+        st.sidebar.warning("⚠️ Export your data regularly! Database may reset on redeployment.")
+        
+        # Export all lab records
+        if st.sidebar.button("📥 Download All Lab Records (CSV)"):
+            with st.spinner("Generating comprehensive lab records export..."):
+                lab_records_df = export_all_lab_records()
+                
+                if lab_records_df is not None and not lab_records_df.empty:
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    csv = lab_records_df.to_csv(index=False)
+                    
+                    st.sidebar.download_button(
+                        label="💾 Download Lab Records CSV",
+                        data=csv,
+                        file_name=f"breast_lab_records_{timestamp}.csv",
+                        mime="text/csv",
+                        key="download_all_lab_records"
+                    )
+                    
+                    # Show preview
+                    st.sidebar.info(f"✅ Ready to download {len(lab_records_df)} records")
+                    
+                    with st.sidebar.expander("📋 Preview Lab Records"):
+                        st.dataframe(lab_records_df.head(3))
+                else:
+                    st.sidebar.error("No lab records found to export")
+        
+        # Quick stats
+        if st.sidebar.button("📈 Show Database Statistics"):
+            conn = sqlite3.connect(DB_FILE)
+            patient_count = get_patient_count()
+            prediction_count = pd.read_sql_query("SELECT COUNT(*) as count FROM predictions", conn)['count'][0]
+            conn.close()
+            
+            st.sidebar.success(f"""
+            **Database Statistics:**
+            - Patients: {patient_count}
+            - Predictions: {prediction_count}
+            - Total Records: {patient_count + prediction_count}
+            """)
+
+# =============================================================================
 # PAGE CONFIGURATION
 # =============================================================================
 st.set_page_config(
@@ -296,7 +456,9 @@ def initialize_session_state():
         },
         'current_page': 0,
         'patients_per_page': 20,
-        'search_term': ""
+        'search_term': "",
+        'logged_in': False,
+        'username': None
     }
     
     # Set defaults
@@ -516,16 +678,7 @@ def generate_pdf_report(patient_data, prediction_data, input_data, doctor_notes,
     story.append(Paragraph(risk_explanation, styles['Normal']))
     story.append(Spacer(1, 20))
     
-    # Disclaimer
-    disclaimer_style = ParagraphStyle(
-        'DisclaimerStyle',
-        parent=styles['Normal'],
-        fontSize=8,
-        textColor=colors.gray,
-        alignment=1
-    )
-    
-
+   
     # Build PDF
     doc.build(story)
     buffer.seek(0)
@@ -1367,6 +1520,7 @@ def about_tab():
     - **Visual Analytics**: Interactive risk gauges and charts
     - **Report Generation**: Professional PDF reports with customizable notes
     - **Scalable Database**: Supports 10,000+ patient records efficiently
+    - **Secure Admin Access**: Password-protected data export features
 
     ---
     
@@ -1385,6 +1539,12 @@ def main():
     )
     
     show_tutorial()
+    
+    # Authentication system
+    is_logged_in = login_section()
+    
+    # Data export system (only for logged-in users)
+    download_all_data_section()
     
     with st.sidebar:
         st.header("⚙️ Configuration")
